@@ -5,6 +5,7 @@ This project provides a reverse proxy for GitHub Copilot, exposing OpenAI-compat
 ## Features
 
 - **OAuth Device Flow Authentication**: Secure authentication with GitHub Copilot using the same flow as OpenCode
+- **Vision Support**: Full support for image/vision requests with base64-encoded images in OpenAI-compatible format
 - **Advanced Token Management**: 
   - Proactive token refresh (refreshes at 20% of token lifetime, minimum 5 minutes)
   - Exponential backoff retry logic for failed token refreshes
@@ -450,6 +451,40 @@ curl -X POST http://localhost:8081/v1/chat/completions \
     "messages": [{"role": "user", "content": "Write a hello world in Python"}],
     "max_tokens": 100
   }'
+```
+
+### Vision/Image Requests
+
+The proxy fully supports vision capabilities with base64-encoded images in OpenAI-compatible format:
+
+```bash
+# Example with base64-encoded image
+curl -X POST http://localhost:8081/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ..."}}
+      ]
+    }],
+    "max_tokens": 300
+  }'
+```
+
+**Vision Features:**
+- Supports multi-part message content (text + images)
+- Accepts base64-encoded images as data URIs
+- Supports `detail` parameter (`auto`, `low`, `high`)
+- Compatible with vision-capable models (gpt-4o, gpt-4-vision, etc.)
+- Backward compatible with text-only requests
+
+**Example Script:**
+The repository includes `test_vision_proxy.sh` that demonstrates vision capabilities:
+```bash
+./test_vision_proxy.sh dog.jpeg "Describe this image in detail"
 ```
 
 ### Using with OpenAI Python Client

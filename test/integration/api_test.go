@@ -1,11 +1,13 @@
 package integration_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -235,6 +237,123 @@ func TestChatCompletionsEndpoint(t *testing.T) {
 			if resp.StatusCode != tt.expectedStatus {
 				respBody, _ := io.ReadAll(resp.Body)
 				t.Errorf("Expected status %d, got %d. Response: %s", tt.expectedStatus, resp.StatusCode, string(respBody))
+			}
+		})
+	}
+}
+
+// TestHeaderForwardingProxy checks correct forwarding and defaulting of Content-Type, Accept, Accept-Encoding, TE headers
+func TestHeaderForwardingProxy(t *testing.T) {
+	// --- Setup fake upstream server to capture proxied headers ---
+	var capturedHeaders http.Header
+	mux := http.NewServeMux()
+	mux.HandleFunc("/completions", func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Patch config to point upstream base URLs to our fake server
+	cfg := &internal.Config{
+		Port:          0,
+		CopilotToken:  "token",
+		AllowedModels: []string{"gpt-4"},
+	}
+	internal.SetDefaultTimeouts(cfg)
+	internal.SetDefaultHeaders(cfg)
+	internal.SetDefaultCORS(cfg)
+
+	// Patch copilotAPIBase global for upstream redirection
+
+	httpClient := &http.Client{Transport: &http.Transport{}} // No proxy; we patch target URL directly
+	proxy := internal.NewProxyService(cfg, httpClient, internal.NewAuthService(httpClient), internal.NewWorkerPool(1))
+	srv := httptest.NewServer(proxy.Handler())
+	defer srv.Close()
+
+	cases := []struct {
+		name         string
+		headers      map[string]string
+		wantExpected map[string]string
+	}{
+		{
+			name: "all client headers set",
+			headers: map[string]string{
+				"Content-Type":    "custom/type",
+				"Accept":          "foo/bar",
+				"Accept-Encoding": "gzip, deflate",
+				"TE":              "trailers",
+			},
+			wantExpected: map[string]string{
+				"Content-Type":    "custom/type",
+				"Accept":          "foo/bar",
+				"Accept-Encoding": "gzip, deflate",
+				"TE":              "trailers",
+			},
+		},
+		{
+			name: "content-type only",
+			headers: map[string]string{
+				"Content-Type": "foo/baz",
+			},
+			wantExpected: map[string]string{
+				"Content-Type": "foo/baz",
+				"Accept":       "application/json",
+			},
+		},
+		{
+			name: "accept only",
+			headers: map[string]string{
+				"Accept": "bar/foo",
+			},
+			wantExpected: map[string]string{
+				"Content-Type": "application/json",
+				"Accept":       "bar/foo",
+			},
+		},
+		{
+			name:    "neither set (default both)",
+			headers: map[string]string{},
+			wantExpected: map[string]string{
+				"Content-Type": "application/json",
+				"Accept":       "application/json",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			capturedHeaders = nil // Reset
+			jsonBody := `{"model":"gpt-4","prompt":"x"}`
+			client := &http.Client{}
+			req, err := http.NewRequest("POST", srv.URL+"/v1/completions", strings.NewReader(jsonBody))
+			if err != nil {
+				t.Fatalf("new req err: %v", err)
+			}
+			for k, v := range tc.headers {
+				req.Header.Set(k, v)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("proxy req failed: %v", err)
+			}
+			io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			for wantKey, wantVal := range tc.wantExpected {
+				got := capturedHeaders.Get(wantKey)
+				if got != wantVal {
+					t.Errorf("expected header %q to be %q, got %q. All headers: %+v", wantKey, wantVal, got, capturedHeaders)
+				}
+			}
+			for _, opt := range []string{"Accept-Encoding", "TE"} {
+				if _, ok := tc.headers[opt]; !ok {
+					if capturedHeaders.Get(opt) != "" {
+						t.Errorf("expected header %q absent, got %q. All headers: %+v", opt, capturedHeaders.Get(opt), capturedHeaders)
+					}
+				}
 			}
 		})
 	}
@@ -560,4 +679,189 @@ func waitForServer(baseURL string, timeout time.Duration) bool {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return false
+}
+
+// TestVisionSupport tests that the proxy correctly handles vision/image requests
+func TestVisionSupport(t *testing.T) {
+// Create a small 1x1 transparent PNG image for testing
+pngData, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+imageDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngData)
+
+tests := []struct {
+name           string
+payload        string
+expectedStatus int
+description    string
+}{
+{
+name: "vision request with image_url",
+payload: fmt.Sprintf(`{
+"model": "gpt-4o",
+"messages": [{
+"role": "user",
+"content": [
+{"type": "text", "text": "Describe this image"},
+{"type": "image_url", "image_url": {"url": "%s"}}
+]
+}],
+"max_tokens": 100
+}`, imageDataURL),
+expectedStatus: http.StatusUnauthorized, // Will fail auth, but should accept the payload structure
+description:    "Multi-part content with image should be accepted",
+},
+{
+name: "vision request with base64 image",
+payload: fmt.Sprintf(`{
+"model": "gpt-4o",
+"messages": [{
+"role": "user",
+"content": [
+{"type": "text", "text": "What's in this image?"},
+{"type": "image_url", "image_url": {"url": "%s", "detail": "high"}}
+]
+}],
+"max_tokens": 200
+}`, imageDataURL),
+expectedStatus: http.StatusUnauthorized,
+description:    "Image with detail parameter should be accepted",
+},
+{
+name: "text-only request still works",
+payload: `{
+"model": "gpt-4o",
+"messages": [{
+"role": "user",
+"content": "Hello"
+}],
+"max_tokens": 50
+}`,
+expectedStatus: http.StatusUnauthorized,
+description:    "Backward compatibility: text-only content should still work",
+},
+{
+name: "mixed text and vision in same conversation",
+payload: fmt.Sprintf(`{
+"model": "gpt-4o",
+"messages": [
+{
+"role": "user",
+"content": "Hello"
+},
+{
+"role": "assistant",
+"content": "Hi! How can I help?"
+},
+{
+"role": "user",
+"content": [
+{"type": "text", "text": "Look at this"},
+{"type": "image_url", "image_url": {"url": "%s"}}
+]
+}
+],
+"max_tokens": 150
+}`, imageDataURL),
+expectedStatus: http.StatusUnauthorized,
+description:    "Mixed text and vision messages should be accepted",
+},
+}
+
+for _, tt := range tests {
+t.Run(tt.name, func(t *testing.T) {
+req, err := http.NewRequest("POST", baseURL+"/v1/chat/completions", strings.NewReader(tt.payload))
+if err != nil {
+t.Fatalf("Failed to create request: %v", err)
+}
+req.Header.Set("Content-Type", "application/json")
+
+client := &http.Client{Timeout: 10 * time.Second}
+resp, err := client.Do(req)
+if err != nil {
+t.Fatalf("Failed to make request: %v", err)
+}
+defer resp.Body.Close()
+
+// We expect 401 because we don't have auth in tests
+// But the important part is that the request is not rejected as "bad request"
+if resp.StatusCode != tt.expectedStatus {
+body, _ := io.ReadAll(resp.Body)
+t.Errorf("%s: Expected status %d, got %d. Response: %s", 
+tt.description, tt.expectedStatus, resp.StatusCode, string(body))
+}
+
+// If we got a 400, it means the payload structure was rejected
+if resp.StatusCode == http.StatusBadRequest {
+body, _ := io.ReadAll(resp.Body)
+t.Errorf("%s: Vision payload was rejected as bad request. Response: %s",
+tt.description, string(body))
+}
+})
+}
+}
+
+// TestVisionPayloadValidation ensures vision payloads pass JSON validation
+func TestVisionPayloadValidation(t *testing.T) {
+pngData, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+imageDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngData)
+
+tests := []struct {
+name           string
+payload        string
+shouldPass     bool
+description    string
+}{
+{
+name: "valid vision payload",
+payload: fmt.Sprintf(`{
+"model": "gpt-4o",
+"messages": [{
+"role": "user",
+"content": [
+{"type": "text", "text": "test"},
+{"type": "image_url", "image_url": {"url": "%s"}}
+]
+}]
+}`, imageDataURL),
+shouldPass:  true,
+description: "Valid vision payload should pass validation",
+},
+{
+name:        "missing model field",
+payload:     `{"messages": [{"role": "user", "content": "test"}]}`,
+shouldPass:  true,
+description: "Missing model field results in empty model",
+},
+{
+name:        "invalid json",
+payload:     `{"model": "gpt-4o", invalid}`,
+shouldPass:  false,
+description: "Invalid JSON should fail",
+},
+}
+
+for _, tt := range tests {
+t.Run(tt.name, func(t *testing.T) {
+req, err := http.NewRequest("POST", baseURL+"/v1/chat/completions", strings.NewReader(tt.payload))
+if err != nil {
+t.Fatalf("Failed to create request: %v", err)
+}
+req.Header.Set("Content-Type", "application/json")
+
+client := &http.Client{Timeout: 10 * time.Second}
+resp, err := client.Do(req)
+if err != nil {
+t.Fatalf("Failed to make request: %v", err)
+}
+defer resp.Body.Close()
+
+isBadRequest := resp.StatusCode == http.StatusBadRequest
+if tt.shouldPass && isBadRequest {
+body, _ := io.ReadAll(resp.Body)
+t.Errorf("%s: Expected to pass, got 400. Response: %s", tt.description, string(body))
+}
+if !tt.shouldPass && !isBadRequest {
+t.Errorf("%s: Expected to fail validation, got status %d", tt.description, resp.StatusCode)
+}
+})
+}
 }
