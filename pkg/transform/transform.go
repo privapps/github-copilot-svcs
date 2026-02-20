@@ -1,6 +1,8 @@
 // Package transform provides OpenAI-compatible request/response structures for github-copilot-svcs.
 package transform
 
+import "encoding/json"
+
 // ChatCompletionRequest ...
 type ChatCompletionRequest struct {
 	Model       string                  `json:"model"`
@@ -10,10 +12,26 @@ type ChatCompletionRequest struct {
 	Stream      bool                    `json:"stream,omitempty"`
 }
 
-// ChatCompletionMessage ...
+// ChatCompletionMessage supports both text-only content (string) and multi-part content (array)
+// for vision/image requests. Content can be either:
+//   - A string for simple text messages
+//   - An array of ContentPart objects for messages with images
 type ChatCompletionMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"` // Can be string or []ContentPart
+}
+
+// ContentPart represents a part of a multi-part message (text or image)
+type ContentPart struct {
+	Type     string    `json:"type"`               // "text" or "image_url"
+	Text     string    `json:"text,omitempty"`     // For type="text"
+	ImageURL *ImageURL `json:"image_url,omitempty"` // For type="image_url"
+}
+
+// ImageURL contains the image URL (can be http(s):// or data: URI with base64)
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"` // "auto", "low", or "high"
 }
 
 // ChatCompletionResponse ...

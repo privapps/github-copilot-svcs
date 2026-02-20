@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-const (
-	copilotAPIBase      = "https://api.githubcopilot.com"
-	chatCompletionsPath = "/chat/completions"
+var copilotAPIBase = "https://api.githubcopilot.com"
+var completionsPath = "/completions"
+var chatCompletionsPath = "/chat/completions"
 
-	// Retry configuration for chat completions
+const (
 	maxChatRetries     = 3
 	baseChatRetryDelay = 1 // seconds
 
@@ -323,41 +323,41 @@ func (s *ProxyService) processProxyRequest(ctx context.Context, w http.ResponseW
 		return fmt.Errorf("bad request: empty request body")
 	}
 
+	var input struct {
+		Model string `json:"model"`
+	}
+	if jsonErr := json.Unmarshal(body, &input); jsonErr != nil {
+		return fmt.Errorf("bad request: invalid JSON: %w", jsonErr)
+	}
 
-    var input struct {
-        Model string `json:"model"`
-    }
-    if jsonErr := json.Unmarshal(body, &input); jsonErr != nil {
-        return fmt.Errorf("bad request: invalid JSON: %w", jsonErr)
-    }
+	// AllowedModels validation
+	if len(s.config.AllowedModels) > 0 {
+		allowed := false
+		for _, m := range s.config.AllowedModels {
+			if input.Model == m {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("bad request: model '%s' is not allowed by allowed_models in config", input.Model)
+		}
+	}
 
-    // AllowedModels validation
-    if len(s.config.AllowedModels) > 0 {
-        allowed := false
-        for _, m := range s.config.AllowedModels {
-            if input.Model == m {
-                allowed = true
-                break
-            }
-        }
-        if !allowed {
-            return fmt.Errorf("bad request: model '%s' is not allowed by allowed_models in config", input.Model)
-        }
-    }
-
-    // Ensure we have a valid token before making the request
-    if tokenErr := s.authService.EnsureValidToken(s.config); tokenErr != nil {
-        Error("Failed to ensure valid token", "error", tokenErr)
-        return NewAuthError("token validation failed", tokenErr)
-    }
+	// Ensure we have a valid token before making the request
+	if tokenErr := s.authService.EnsureValidToken(s.config); tokenErr != nil {
+		Error("Failed to ensure valid token", "error", tokenErr)
+		return NewAuthError("token validation failed", tokenErr)
+	}
 
 	// Create new request to GitHub Copilot
 	var targetURL string
+	base := copilotAPIBase
 	switch r.URL.Path {
 	case "/v1/completions":
-		targetURL = copilotAPIBase + "/completions"
+		targetURL = base + completionsPath
 	case "/v1/chat/completions":
-		targetURL = copilotAPIBase + chatCompletionsPath
+		targetURL = base + chatCompletionsPath
 	default:
 		return fmt.Errorf("unsupported proxy path: %s", r.URL.Path)
 	}
@@ -370,9 +370,21 @@ func (s *ProxyService) processProxyRequest(ctx context.Context, w http.ResponseW
 	}
 
 	// Set headers
+	// Forward content/negotiation headers from client if present; use defaults if missing
+	headersToProxy := []string{"Content-Type", "Accept", "Accept-Encoding", "TE"}
+	defaults := map[string]string{
+		"Content-Type": "application/json",
+		"Accept":       "application/json",
+	}
+	for _, h := range headersToProxy {
+		if v := r.Header.Get(h); v != "" {
+			req.Header.Set(h, v)
+		} else if def, ok := defaults[h]; ok {
+			req.Header.Set(h, def)
+		}
+	}
+
 	req.Header.Set("Authorization", "Bearer "+s.config.CopilotToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", s.config.Headers.UserAgent)
 	req.Header.Set("Editor-Version", s.config.Headers.EditorVersion)
 	req.Header.Set("Editor-Plugin-Version", s.config.Headers.EditorPluginVersion)
