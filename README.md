@@ -2,6 +2,12 @@
 
 This project provides a reverse proxy for GitHub Copilot, exposing OpenAI-compatible endpoints for use with tools and clients that expect the OpenAI API. It follows the authentication and token management approach used by [OpenCode](https://github.com/sst/opencode).
 
+> **❗ IMPORTANT: Vision/Image capability is not available on all GitHub Copilot accounts!**
+> - Even if your account supports GPT-4o, **vision features may not be enabled** for your Copilot subscription.
+> - Some orgs and accounts do not have access to vision/image generation/analysis, or may have different levels of support than OpenAI direct accounts.
+> - This proxy supports vision for Copilot accounts _if_ your Copilot subscription supports it. If your account does not, you will receive a relevant error from the upstream API.
+> - For latest details, check your Copilot subscription or contact GitHub support for your organization/account.
+
 ## Features
 
 - **OAuth Device Flow Authentication**: Secure authentication with GitHub Copilot using the same flow as OpenCode
