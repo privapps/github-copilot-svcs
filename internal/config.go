@@ -1,14 +1,14 @@
 package internal
 
 import (
-       "encoding/json"
-       "errors"
-       "fmt"
-       "os"
-       "os/user"
-       "path/filepath"
-       "strconv"
-       "strings"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // Constants for configuration
@@ -50,12 +50,12 @@ const (
 
 // Config represents the application configuration
 type Config struct {
-    Port         int      `json:"port"`
-    GitHubToken  string   `json:"github_token"`
-    CopilotToken string   `json:"copilot_token"`
-    ExpiresAt    int64    `json:"expires_at"`
-    RefreshIn    int64    `json:"refresh_in"`
-    AllowedModels []string `json:"allowed_models"`
+	Port          int      `json:"port"`
+	GitHubToken   string   `json:"github_token"`
+	CopilotToken  string   `json:"copilot_token"`
+	ExpiresAt     int64    `json:"expires_at"`
+	RefreshIn     int64    `json:"refresh_in"`
+	AllowedModels []string `json:"allowed_models"`
 
 	// HTTP Headers configuration
 	Headers struct {
@@ -145,17 +145,17 @@ func LoadConfig(skipTokenValidation ...bool) (*Config, error) {
 		cfg.Port = defaultServerPort
 	}
 
-       // Validate configuration
-       skip := len(skipTokenValidation) > 0 && skipTokenValidation[0]
-       if skip {
-               if err := cfg.validateCore(); err != nil {
-                       return nil, fmt.Errorf("configuration validation failed: %w", err)
-               }
-       } else {
-               if err := cfg.Validate(); err != nil {
-                       return nil, fmt.Errorf("configuration validation failed: %w", err)
-               }
-       }
+	// Validate configuration
+	skip := len(skipTokenValidation) > 0 && skipTokenValidation[0]
+	if skip {
+		if err := cfg.validateCore(); err != nil {
+			return nil, fmt.Errorf("configuration validation failed: %w", err)
+		}
+	} else {
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("configuration validation failed: %w", err)
+		}
+	}
 
 	return cfg, nil
 }
@@ -254,10 +254,10 @@ func (c *Config) validatePort() error {
 }
 
 func (c *Config) validateTokens() error {
-       if c.GitHubToken == "" && c.CopilotToken == "" {
-               return ErrMissingTokens
-       }
-       return nil
+	if c.GitHubToken == "" && c.CopilotToken == "" {
+		return ErrMissingTokens
+	}
+	return nil
 }
 
 func (c *Config) validateTimeouts() error {
@@ -438,25 +438,28 @@ func (c *Config) SaveConfig(pathOverride ...string) error {
 	}()
 	return json.NewEncoder(f).Encode(c)
 }
+
 // UnmarshalConfig is a helper for direct config JSON parsing in tests
 func UnmarshalConfig(data []byte, cfg *Config) error {
-    return json.Unmarshal(data, cfg)
+	return json.Unmarshal(data, cfg)
 }
+
 // ErrMissingTokens is returned when neither github_token nor copilot_token are present in configuration.
 var ErrMissingTokens = errors.New("missing github_token or copilot_token")
+
 // validateCore validates config without token validation
 func (c *Config) validateCore() error {
-       if err := c.validatePort(); err != nil {
-               return err
-       }
-       if err := c.validateTimeouts(); err != nil {
-               return err
-       }
-       if err := c.validateHeaders(); err != nil {
-               return err
-       }
-       if err := c.validateCORS(); err != nil {
-               return err
-       }
-       return nil
+	if err := c.validatePort(); err != nil {
+		return err
+	}
+	if err := c.validateTimeouts(); err != nil {
+		return err
+	}
+	if err := c.validateHeaders(); err != nil {
+		return err
+	}
+	if err := c.validateCORS(); err != nil {
+		return err
+	}
+	return nil
 }

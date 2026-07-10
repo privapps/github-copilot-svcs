@@ -2,10 +2,10 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
-	"fmt"
 	"time"
 )
 
@@ -44,10 +44,9 @@ func (h *DenseTextHandler) Handle(_ context.Context, r slog.Record) error {
 
 // WithAttrs returns the handler unchanged (attrs unused).
 func (h *DenseTextHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+
 // WithGroup returns the handler unchanged (name unused).
-func (h *DenseTextHandler) WithGroup(_ string) slog.Handler       { return h }
-
-
+func (h *DenseTextHandler) WithGroup(_ string) slog.Handler { return h }
 
 const (
 	defaultLogLevel = "info"

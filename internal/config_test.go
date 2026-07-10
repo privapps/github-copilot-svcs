@@ -268,52 +268,52 @@ func TestSetDefaultValues(t *testing.T) {
 	})
 }
 func TestAllowedModelsConfig(t *testing.T) {
-    t.Run("loads allowed_models and respects null behavior", func(t *testing.T) {
-        cfg := &internal.Config{
-            Port: 8081,
-        }
-        // Should default (nil) when not set
-        if cfg.AllowedModels != nil {
-            t.Errorf("Expected AllowedModels nil, got %v", cfg.AllowedModels)
-        }
-        cfg.AllowedModels = []string{"gpt-4o", "claude-3.7-sonnet"}
-        // Simulate allowed
-        allowed := func(model string) bool {
-            for _, m := range cfg.AllowedModels {
-                if m == model {
-                    return true
-                }
-            }
-            return false
-        }
-        if !allowed("gpt-4o") || !allowed("claude-3.7-sonnet") {
-            t.Errorf("Known allowed models not accepted")
-        }
-        if allowed("bad-model") {
-            t.Errorf("Unexpected model allowed")
-        }
-    })
-    t.Run("config JSON parsing includes allowed_models", func(t *testing.T) {
-        jsonCfg := []byte(`{"port":8081, "allowed_models": ["foo", "bar"]}`)
-        var cfg internal.Config
-        if err := internal.UnmarshalConfig(jsonCfg, &cfg); err != nil {
-            t.Fatalf("Failed to decode allowed_models config: %v", err)
-        }
-        if len(cfg.AllowedModels) != 2 || cfg.AllowedModels[0] != "foo" || cfg.AllowedModels[1] != "bar" {
-            t.Errorf("Config parsing error for allowed_models: %#v", cfg.AllowedModels)
-        }
-    })
+	t.Run("loads allowed_models and respects null behavior", func(t *testing.T) {
+		cfg := &internal.Config{
+			Port: 8081,
+		}
+		// Should default (nil) when not set
+		if cfg.AllowedModels != nil {
+			t.Errorf("Expected AllowedModels nil, got %v", cfg.AllowedModels)
+		}
+		cfg.AllowedModels = []string{"gpt-4o", "claude-3.7-sonnet"}
+		// Simulate allowed
+		allowed := func(model string) bool {
+			for _, m := range cfg.AllowedModels {
+				if m == model {
+					return true
+				}
+			}
+			return false
+		}
+		if !allowed("gpt-4o") || !allowed("claude-3.7-sonnet") {
+			t.Errorf("Known allowed models not accepted")
+		}
+		if allowed("bad-model") {
+			t.Errorf("Unexpected model allowed")
+		}
+	})
+	t.Run("config JSON parsing includes allowed_models", func(t *testing.T) {
+		jsonCfg := []byte(`{"port":8081, "allowed_models": ["foo", "bar"]}`)
+		var cfg internal.Config
+		if err := internal.UnmarshalConfig(jsonCfg, &cfg); err != nil {
+			t.Fatalf("Failed to decode allowed_models config: %v", err)
+		}
+		if len(cfg.AllowedModels) != 2 || cfg.AllowedModels[0] != "foo" || cfg.AllowedModels[1] != "bar" {
+			t.Errorf("Config parsing error for allowed_models: %#v", cfg.AllowedModels)
+		}
+	})
 }
 func internalerrorsIs(err, target error) bool {
-       // Handle errors.Is for wrapped errors in Go 1.13+, separate helper avoids import cycle
-       if err == nil {
-               return false
-       }
-       if err == target {
-               return true
-       }
-       if unwrapper, ok := err.(interface{ Unwrap() error }); ok {
-               return internalerrorsIs(unwrapper.Unwrap(), target)
-       }
-       return false
+	// Handle errors.Is for wrapped errors in Go 1.13+, separate helper avoids import cycle
+	if err == nil {
+		return false
+	}
+	if err == target {
+		return true
+	}
+	if unwrapper, ok := err.(interface{ Unwrap() error }); ok {
+		return internalerrorsIs(unwrapper.Unwrap(), target)
+	}
+	return false
 }

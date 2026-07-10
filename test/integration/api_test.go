@@ -244,16 +244,10 @@ func TestChatCompletionsEndpoint(t *testing.T) {
 
 // TestHeaderForwardingProxy checks correct forwarding and defaulting of Content-Type, Accept, Accept-Encoding, TE headers
 func TestHeaderForwardingProxy(t *testing.T) {
-	// Skip in CI/GitHub Actions because copilotAPIBase is hardcoded and cannot be overridden
-	// This test requires architecture changes to inject test server URL
-	if os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
-		t.Skip("Skipping in CI: test requires infrastructure changes to inject test server URL")
-	}
-
 	// --- Setup fake upstream server to capture proxied headers ---
 	var capturedHeaders http.Header
 	mux := http.NewServeMux()
-	mux.HandleFunc("/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		capturedHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
@@ -262,19 +256,22 @@ func TestHeaderForwardingProxy(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
+	// Point the proxy at our fake upstream
+	internal.SetCopilotAPIBase(ts.URL)
+	defer internal.ResetCopilotAPIBase()
+
 	// Patch config to point upstream base URLs to our fake server
 	cfg := &internal.Config{
 		Port:          0,
 		CopilotToken:  "token",
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
 		AllowedModels: []string{"gpt-4"},
 	}
 	internal.SetDefaultTimeouts(cfg)
 	internal.SetDefaultHeaders(cfg)
 	internal.SetDefaultCORS(cfg)
 
-	// Patch copilotAPIBase global for upstream redirection
-
-	httpClient := &http.Client{Transport: &http.Transport{}} // No proxy; we patch target URL directly
+	httpClient := &http.Client{Transport: &http.Transport{}}
 	proxy := internal.NewProxyService(cfg, httpClient, internal.NewAuthService(httpClient), internal.NewWorkerPool(1))
 	srv := httptest.NewServer(proxy.Handler())
 	defer srv.Close()
@@ -332,9 +329,9 @@ func TestHeaderForwardingProxy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			capturedHeaders = nil // Reset
-			jsonBody := `{"model":"gpt-4","prompt":"x"}`
+			jsonBody := `{"model":"gpt-4","messages":[{"role":"user","content":"test"}]}`
 			client := &http.Client{}
-			req, err := http.NewRequest("POST", srv.URL+"/v1/completions", strings.NewReader(jsonBody))
+			req, err := http.NewRequest("POST", srv.URL+"/v1/chat/completions", strings.NewReader(jsonBody))
 			if err != nil {
 				t.Fatalf("new req err: %v", err)
 			}
@@ -354,19 +351,19 @@ func TestHeaderForwardingProxy(t *testing.T) {
 					t.Errorf("expected header %q to be %q, got %q. All headers: %+v", wantKey, wantVal, got, capturedHeaders)
 				}
 			}
-			for _, opt := range []string{"Accept-Encoding", "TE"} {
-				if _, ok := tc.headers[opt]; !ok {
-					if capturedHeaders.Get(opt) != "" {
-						t.Errorf("expected header %q absent, got %q. All headers: %+v", opt, capturedHeaders.Get(opt), capturedHeaders)
-					}
+			// TE should not be forwarded unless explicitly set by client.
+			// Note: Accept-Encoding may be added automatically by Go's HTTP client.
+			if _, ok := tc.headers["TE"]; !ok {
+				if capturedHeaders.Get("TE") != "" {
+					t.Errorf("expected header %q absent, got %q. All headers: %+v", "TE", capturedHeaders.Get("TE"), capturedHeaders)
 				}
 			}
 		})
 	}
 }
 
-// TestCompletionsEndpoint mirrors TestChatCompletionsEndpoint but for /v1/completions
-func TestCompletionsEndpoint(t *testing.T) {
+// TestResponsesEndpoint tests the /v1/responses endpoint for GPT-5.x models
+func TestResponsesEndpoint(t *testing.T) {
 	tests := []struct {
 		name           string
 		method         string
@@ -376,34 +373,34 @@ func TestCompletionsEndpoint(t *testing.T) {
 		contentType    string
 	}{
 		{
-			name:           "completions with empty body",
+			name:           "responses with empty body",
 			method:         "POST",
-			endpoint:       "/v1/completions",
+			endpoint:       "/v1/responses",
 			body:           "",
 			expectedStatus: http.StatusBadRequest,
 			contentType:    "application/json",
 		},
 		{
-			name:           "completions with invalid JSON",
+			name:           "responses with invalid JSON",
 			method:         "POST",
-			endpoint:       "/v1/completions",
+			endpoint:       "/v1/responses",
 			body:           `{"invalid": json}`,
 			expectedStatus: http.StatusBadRequest,
 			contentType:    "application/json",
 		},
 		{
-			name:           "completions with wrong method",
+			name:           "responses with wrong method",
 			method:         "GET",
-			endpoint:       "/v1/completions",
+			endpoint:       "/v1/responses",
 			body:           "",
 			expectedStatus: http.StatusMethodNotAllowed,
 			contentType:    "application/json",
 		},
 		{
-			name:           "completions with basic valid request",
+			name:           "responses with basic valid request",
 			method:         "POST",
-			endpoint:       "/v1/completions",
-			body:           `{"model":"gpt-4","prompt":"test"}`,
+			endpoint:       "/v1/responses",
+			body:           `{"model":"gpt-5.6-luna","input":"test","max_output_tokens":50}`,
 			expectedStatus: http.StatusUnauthorized, // Should be 401 if auth is missing
 			contentType:    "application/json",
 		},
@@ -689,19 +686,19 @@ func waitForServer(baseURL string, timeout time.Duration) bool {
 
 // TestVisionSupport tests that the proxy correctly handles vision/image requests
 func TestVisionSupport(t *testing.T) {
-// Create a small 1x1 transparent PNG image for testing
-pngData, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
-imageDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngData)
+	// Create a small 1x1 transparent PNG image for testing
+	pngData, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+	imageDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngData)
 
-tests := []struct {
-name           string
-payload        string
-expectedStatus int
-description    string
-}{
-{
-name: "vision request with image_url",
-payload: fmt.Sprintf(`{
+	tests := []struct {
+		name           string
+		payload        string
+		expectedStatus int
+		description    string
+	}{
+		{
+			name: "vision request with image_url",
+			payload: fmt.Sprintf(`{
 "model": "gpt-4o",
 "messages": [{
 "role": "user",
@@ -712,12 +709,12 @@ payload: fmt.Sprintf(`{
 }],
 "max_tokens": 100
 }`, imageDataURL),
-expectedStatus: http.StatusUnauthorized, // Will fail auth, but should accept the payload structure
-description:    "Multi-part content with image should be accepted",
-},
-{
-name: "vision request with base64 image",
-payload: fmt.Sprintf(`{
+			expectedStatus: http.StatusUnauthorized, // Will fail auth, but should accept the payload structure
+			description:    "Multi-part content with image should be accepted",
+		},
+		{
+			name: "vision request with base64 image",
+			payload: fmt.Sprintf(`{
 "model": "gpt-4o",
 "messages": [{
 "role": "user",
@@ -728,12 +725,12 @@ payload: fmt.Sprintf(`{
 }],
 "max_tokens": 200
 }`, imageDataURL),
-expectedStatus: http.StatusUnauthorized,
-description:    "Image with detail parameter should be accepted",
-},
-{
-name: "text-only request still works",
-payload: `{
+			expectedStatus: http.StatusUnauthorized,
+			description:    "Image with detail parameter should be accepted",
+		},
+		{
+			name: "text-only request still works",
+			payload: `{
 "model": "gpt-4o",
 "messages": [{
 "role": "user",
@@ -741,12 +738,12 @@ payload: `{
 }],
 "max_tokens": 50
 }`,
-expectedStatus: http.StatusUnauthorized,
-description:    "Backward compatibility: text-only content should still work",
-},
-{
-name: "mixed text and vision in same conversation",
-payload: fmt.Sprintf(`{
+			expectedStatus: http.StatusUnauthorized,
+			description:    "Backward compatibility: text-only content should still work",
+		},
+		{
+			name: "mixed text and vision in same conversation",
+			payload: fmt.Sprintf(`{
 "model": "gpt-4o",
 "messages": [
 {
@@ -767,58 +764,58 @@ payload: fmt.Sprintf(`{
 ],
 "max_tokens": 150
 }`, imageDataURL),
-expectedStatus: http.StatusUnauthorized,
-description:    "Mixed text and vision messages should be accepted",
-},
-}
+			expectedStatus: http.StatusUnauthorized,
+			description:    "Mixed text and vision messages should be accepted",
+		},
+	}
 
-for _, tt := range tests {
-t.Run(tt.name, func(t *testing.T) {
-req, err := http.NewRequest("POST", baseURL+"/v1/chat/completions", strings.NewReader(tt.payload))
-if err != nil {
-t.Fatalf("Failed to create request: %v", err)
-}
-req.Header.Set("Content-Type", "application/json")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("POST", baseURL+"/v1/chat/completions", strings.NewReader(tt.payload))
+			if err != nil {
+				t.Fatalf("Failed to create request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
 
-client := &http.Client{Timeout: 10 * time.Second}
-resp, err := client.Do(req)
-if err != nil {
-t.Fatalf("Failed to make request: %v", err)
-}
-defer resp.Body.Close()
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("Failed to make request: %v", err)
+			}
+			defer resp.Body.Close()
 
-// We expect 401 because we don't have auth in tests
-// But the important part is that the request is not rejected as "bad request"
-if resp.StatusCode != tt.expectedStatus {
-body, _ := io.ReadAll(resp.Body)
-t.Errorf("%s: Expected status %d, got %d. Response: %s", 
-tt.description, tt.expectedStatus, resp.StatusCode, string(body))
-}
+			// We expect 401 because we don't have auth in tests
+			// But the important part is that the request is not rejected as "bad request"
+			if resp.StatusCode != tt.expectedStatus {
+				body, _ := io.ReadAll(resp.Body)
+				t.Errorf("%s: Expected status %d, got %d. Response: %s",
+					tt.description, tt.expectedStatus, resp.StatusCode, string(body))
+			}
 
-// If we got a 400, it means the payload structure was rejected
-if resp.StatusCode == http.StatusBadRequest {
-body, _ := io.ReadAll(resp.Body)
-t.Errorf("%s: Vision payload was rejected as bad request. Response: %s",
-tt.description, string(body))
-}
-})
-}
+			// If we got a 400, it means the payload structure was rejected
+			if resp.StatusCode == http.StatusBadRequest {
+				body, _ := io.ReadAll(resp.Body)
+				t.Errorf("%s: Vision payload was rejected as bad request. Response: %s",
+					tt.description, string(body))
+			}
+		})
+	}
 }
 
 // TestVisionPayloadValidation ensures vision payloads pass JSON validation
 func TestVisionPayloadValidation(t *testing.T) {
-pngData, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
-imageDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngData)
+	pngData, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+	imageDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngData)
 
-tests := []struct {
-name           string
-payload        string
-shouldPass     bool
-description    string
-}{
-{
-name: "valid vision payload",
-payload: fmt.Sprintf(`{
+	tests := []struct {
+		name        string
+		payload     string
+		shouldPass  bool
+		description string
+	}{
+		{
+			name: "valid vision payload",
+			payload: fmt.Sprintf(`{
 "model": "gpt-4o",
 "messages": [{
 "role": "user",
@@ -828,46 +825,46 @@ payload: fmt.Sprintf(`{
 ]
 }]
 }`, imageDataURL),
-shouldPass:  true,
-description: "Valid vision payload should pass validation",
-},
-{
-name:        "missing model field",
-payload:     `{"messages": [{"role": "user", "content": "test"}]}`,
-shouldPass:  true,
-description: "Missing model field results in empty model",
-},
-{
-name:        "invalid json",
-payload:     `{"model": "gpt-4o", invalid}`,
-shouldPass:  false,
-description: "Invalid JSON should fail",
-},
-}
+			shouldPass:  true,
+			description: "Valid vision payload should pass validation",
+		},
+		{
+			name:        "missing model field",
+			payload:     `{"messages": [{"role": "user", "content": "test"}]}`,
+			shouldPass:  true,
+			description: "Missing model field results in empty model",
+		},
+		{
+			name:        "invalid json",
+			payload:     `{"model": "gpt-4o", invalid}`,
+			shouldPass:  false,
+			description: "Invalid JSON should fail",
+		},
+	}
 
-for _, tt := range tests {
-t.Run(tt.name, func(t *testing.T) {
-req, err := http.NewRequest("POST", baseURL+"/v1/chat/completions", strings.NewReader(tt.payload))
-if err != nil {
-t.Fatalf("Failed to create request: %v", err)
-}
-req.Header.Set("Content-Type", "application/json")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("POST", baseURL+"/v1/chat/completions", strings.NewReader(tt.payload))
+			if err != nil {
+				t.Fatalf("Failed to create request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
 
-client := &http.Client{Timeout: 10 * time.Second}
-resp, err := client.Do(req)
-if err != nil {
-t.Fatalf("Failed to make request: %v", err)
-}
-defer resp.Body.Close()
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("Failed to make request: %v", err)
+			}
+			defer resp.Body.Close()
 
-isBadRequest := resp.StatusCode == http.StatusBadRequest
-if tt.shouldPass && isBadRequest {
-body, _ := io.ReadAll(resp.Body)
-t.Errorf("%s: Expected to pass, got 400. Response: %s", tt.description, string(body))
-}
-if !tt.shouldPass && !isBadRequest {
-t.Errorf("%s: Expected to fail validation, got status %d", tt.description, resp.StatusCode)
-}
-})
-}
+			isBadRequest := resp.StatusCode == http.StatusBadRequest
+			if tt.shouldPass && isBadRequest {
+				body, _ := io.ReadAll(resp.Body)
+				t.Errorf("%s: Expected to pass, got 400. Response: %s", tt.description, string(body))
+			}
+			if !tt.shouldPass && !isBadRequest {
+				t.Errorf("%s: Expected to fail validation, got status %d", tt.description, resp.StatusCode)
+			}
+		})
+	}
 }

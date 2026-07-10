@@ -23,8 +23,8 @@ type ChatCompletionMessage struct {
 
 // ContentPart represents a part of a multi-part message (text or image)
 type ContentPart struct {
-	Type     string    `json:"type"`               // "text" or "image_url"
-	Text     string    `json:"text,omitempty"`     // For type="text"
+	Type     string    `json:"type"`                // "text" or "image_url"
+	Text     string    `json:"text,omitempty"`      // For type="text"
 	ImageURL *ImageURL `json:"image_url,omitempty"` // For type="image_url"
 }
 
@@ -70,4 +70,5 @@ type Model struct {
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
+	APIType string `json:"api_type"` // "chat_completions" or "responses"
 }

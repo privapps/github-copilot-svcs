@@ -57,8 +57,8 @@ func SetupTestDir(t *testing.T) string {
 
 	t.Cleanup(func() {
 		if err := os.RemoveAll(dir); err != nil {
-	panic(err)
-}
+			panic(err)
+		}
 	})
 
 	return dir

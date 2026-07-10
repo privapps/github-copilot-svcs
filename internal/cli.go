@@ -1,13 +1,13 @@
 package internal
 
 import (
-"encoding/json"
-"errors"
-"flag"
-"fmt"
-"os"
-"time"
-"github.com/privapps/github-copilot-svcs/pkg/transform"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"github.com/privapps/github-copilot-svcs/pkg/transform"
+	"os"
+	"time"
 )
 
 // Command constants to avoid goconst errors
@@ -66,7 +66,6 @@ func RunCommand(command string, args []string, version string) error {
 	// Check for flags
 	jsonOutput := len(args) >= 1 && args[0] == "--json"
 
-
 	switch command {
 	case cmdAuth:
 		return handleAuth()
@@ -113,14 +112,14 @@ func handleAuth() error {
 }
 
 func handleStatusWithFormat(jsonOutput bool) error {
-       cfg, err := LoadConfig()
-       if err != nil {
-               if errors.Is(err, ErrMissingTokens) {
-                       fmt.Println("Not authenticated. Run 'auth' to authenticate.")
-                       return nil
-               }
-               return fmt.Errorf("failed to load config: %v", err)
-       }
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, ErrMissingTokens) {
+			fmt.Println("Not authenticated. Run 'auth' to authenticate.")
+			return nil
+		}
+		return fmt.Errorf("failed to load config: %v", err)
+	}
 
 	if jsonOutput {
 		return printStatusJSON(cfg)
@@ -214,14 +213,14 @@ func printStatusText(cfg *Config) error {
 }
 
 func handleConfig() error {
-       cfg, err := LoadConfig()
-       if err != nil {
-               if errors.Is(err, ErrMissingTokens) {
-                       fmt.Println("Not authenticated. Run 'auth' to authenticate.")
-                       return nil
-               }
-               return fmt.Errorf("failed to load config: %v", err)
-       }
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, ErrMissingTokens) {
+			fmt.Println("Not authenticated. Run 'auth' to authenticate.")
+			return nil
+		}
+		return fmt.Errorf("failed to load config: %v", err)
+	}
 
 	path, _ := GetConfigPath()
 	fmt.Printf("Configuration file: %s\n", path)
@@ -243,26 +242,25 @@ func handleConfig() error {
 	return nil
 }
 
-
 func getCurrentTime() int64 {
 	return time.Now().Unix()
 }
 
 func handleRun() error {
-       cfg, err := LoadConfig()
-       if err != nil {
-               if errors.Is(err, ErrMissingTokens) {
-                       if authErr := handleAuth(); authErr != nil {
-                               return fmt.Errorf("authentication failed: %v", authErr)
-                       }
-                       cfg, err = LoadConfig()
-                       if err != nil {
-                               return fmt.Errorf("failed to load config after authentication: %v", err)
-                       }
-               } else {
-                       return fmt.Errorf("failed to load config: %v", err)
-               }
-       }
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, ErrMissingTokens) {
+			if authErr := handleAuth(); authErr != nil {
+				return fmt.Errorf("authentication failed: %v", authErr)
+			}
+			cfg, err = LoadConfig()
+			if err != nil {
+				return fmt.Errorf("failed to load config after authentication: %v", err)
+			}
+		} else {
+			return fmt.Errorf("failed to load config: %v", err)
+		}
+	}
 
 	// Create HTTP client and auth service
 	httpClient := CreateHTTPClient(cfg)
@@ -279,14 +277,14 @@ func handleRun() error {
 }
 
 func handleModels() error {
-       cfg, err := LoadConfig()
-       if err != nil {
-               if errors.Is(err, ErrMissingTokens) {
-                       fmt.Println("Not authenticated. Run 'auth' to authenticate.")
-                       return nil
-               }
-               return fmt.Errorf("failed to load config: %v", err)
-       }
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, ErrMissingTokens) {
+			fmt.Println("Not authenticated. Run 'auth' to authenticate.")
+			return nil
+		}
+		return fmt.Errorf("failed to load config: %v", err)
+	}
 
 	// Create HTTP client and auth service
 	httpClient := CreateHTTPClient(cfg)
@@ -309,52 +307,52 @@ func handleModels() error {
 		return nil
 	}
 
-    filtered := modelList.Data
-    var unknown []string
-    filteredMsg := ""
-    if len(cfg.AllowedModels) > 0 {
-        allowedSet := make(map[string]struct{}, len(cfg.AllowedModels))
-        for _, name := range cfg.AllowedModels {
-            allowedSet[name] = struct{}{}
-        }
-        var tmp []transform.Model
-        foundSet := make(map[string]struct{})
-        for _, model := range filtered {
-            if _, ok := allowedSet[model.ID]; ok {
-                tmp = append(tmp, model)
-                foundSet[model.ID] = struct{}{}
-            }
-        }
-        for k := range allowedSet {
-            if _, ok := foundSet[k]; !ok {
-                unknown = append(unknown, k)
-            }
-        }
-        filtered = tmp
-        filteredMsg = "NOTE: The model list is filtered by allowed_models in config."
-        if len(unknown) > 0 {
-            fmt.Printf("WARNING: The following allowed_models were not found and are ignored: %v\n", unknown)
-        }
-    }
-    fmt.Printf("Available models (%d shown):\n", len(filtered))
-    for _, model := range filtered {
-        fmt.Printf("  - %s (%s)\n", model.ID, model.OwnedBy)
-    }
-    if filteredMsg != "" {
-        fmt.Println(filteredMsg)
-    }
-    return nil
-} 
+	filtered := modelList.Data
+	var unknown []string
+	filteredMsg := ""
+	if len(cfg.AllowedModels) > 0 {
+		allowedSet := make(map[string]struct{}, len(cfg.AllowedModels))
+		for _, name := range cfg.AllowedModels {
+			allowedSet[name] = struct{}{}
+		}
+		var tmp []transform.Model
+		foundSet := make(map[string]struct{})
+		for _, model := range filtered {
+			if _, ok := allowedSet[model.ID]; ok {
+				tmp = append(tmp, model)
+				foundSet[model.ID] = struct{}{}
+			}
+		}
+		for k := range allowedSet {
+			if _, ok := foundSet[k]; !ok {
+				unknown = append(unknown, k)
+			}
+		}
+		filtered = tmp
+		filteredMsg = "NOTE: The model list is filtered by allowed_models in config."
+		if len(unknown) > 0 {
+			fmt.Printf("WARNING: The following allowed_models were not found and are ignored: %v\n", unknown)
+		}
+	}
+	fmt.Printf("Available models (%d shown):\n", len(filtered))
+	for _, model := range filtered {
+		fmt.Printf("  - %s (%s)\n", model.ID, model.OwnedBy)
+	}
+	if filteredMsg != "" {
+		fmt.Println(filteredMsg)
+	}
+	return nil
+}
 
 func handleRefresh() error {
-       cfg, err := LoadConfig()
-       if err != nil {
-               if errors.Is(err, ErrMissingTokens) {
-                       fmt.Println("Not authenticated. Run 'auth' to authenticate.")
-                       return nil
-               }
-               return fmt.Errorf("failed to load config: %v", err)
-       }
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, ErrMissingTokens) {
+			fmt.Println("Not authenticated. Run 'auth' to authenticate.")
+			return nil
+		}
+		return fmt.Errorf("failed to load config: %v", err)
+	}
 
 	if cfg.CopilotToken == "" {
 		return fmt.Errorf("no token to refresh - run 'auth' command first")

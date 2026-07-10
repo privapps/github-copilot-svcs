@@ -21,7 +21,7 @@ This project provides a reverse proxy for GitHub Copilot, exposing OpenAI-compat
   - Automatic retry with exponential backoff for chat completions (3 attempts)
   - Network error recovery and rate limiting handling
   - 30-second request timeout protection
-- **OpenAI-Compatible API**: Exposes `/v1/chat/completions` and `/v1/models` endpoints
+- **OpenAI-Compatible API**: Exposes `/v1/chat/completions`, `/v1/responses`, and `/v1/models` endpoints
 - **Request/Response Transformation**: Handles model name mapping and ensures OpenAI compatibility
 - **Configurable Port**: Default port 8081, configurable via CLI or config file
 - **Health Monitoring**: `/health` endpoint for service monitoring
@@ -225,7 +225,7 @@ POST http://localhost:8081/v1/chat/completions
 Content-Type: application/json
 
 {
-  "model": "gpt-4",
+  "model": "gpt-4.1",
   "messages": [
     {"role": "user", "content": "Hello, world!"}
   ],
@@ -233,17 +233,16 @@ Content-Type: application/json
 }
 ```
 
-### Completions
-This endpoint is OpenAI-compatible and proxies requests to the upstream Copilot API `/completions` endpoint.
-
+### Responses API
+For GPT-5.x models (nano, mini, codex variants):
 ```bash
-POST http://localhost:8081/v1/completions
+POST http://localhost:8081/v1/responses
 Content-Type: application/json
 
 {
-  "model": "gpt-4",
-  "prompt": "Write a hello world in Python",
-  "max_tokens": 100
+  "model": "gpt-5.6-luna",
+  "input": "Hello, world!",
+  "max_output_tokens": 100
 }
 ```
 
@@ -396,21 +395,22 @@ The authentication follows GitHub Copilot's OAuth device flow:
 
 ## Model Mapping
 
-The proxy automatically maps common model names to GitHub Copilot models:
+The proxy automatically maps common model names to GitHub Copilot models. Each model has an `api_type` field indicating which endpoint to use:
 
-| Input Model | GitHub Copilot Model | Provider |
-|-------------|---------------------|----------|
-| `gpt-4o`, `gpt-4.1`, `gpt-5` | As specified | OpenAI |
-| `o3`, `o3-mini`, `o4-mini` | As specified | OpenAI |
-| `claude-3.5-sonnet`, `claude-3.7-sonnet`, `claude-3.7-sonnet-thought` | As specified | Anthropic |
-| `claude-opus-4`, `claude-sonnet-4` | As specified | Anthropic |
-| `gemini-2.5-pro`, `gemini-2.0-flash-001` | As specified | Google |
+### Chat Completions Models (`/v1/chat/completions`)
+| Model | Provider |
+|-------|----------|
+| `gpt-4o`, `gpt-4.1` | OpenAI |
+| `claude-haiku-4.5`, `claude-sonnet-5`, `claude-opus-4.8` | Anthropic |
+| `gemini-3.5-flash`, `gemini-3.1-pro-preview` | Google |
 
-**Supported Model Categories:**
-- **OpenAI GPT Models**: GPT-4o, GPT-4.1, O3/O4 reasoning models
-- **Anthropic Claude Models**: Claude 3.5/3.7 Sonnet variants, Claude Opus/Sonnet 4
-- **Google Gemini Models**: Gemini 2.0/2.5 Pro and Flash models
-- There are **additional models** available for use. For more information and details about these models, please refer to your GitHub Copilot subscription page.
+### Responses API Models (`/v1/responses`)
+| Model | Provider |
+|-------|----------|
+| `gpt-5.3-codex`, `gpt-5.4-mini` | OpenAI |
+| `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra` | OpenAI |
+
+**Note:** Use the `/v1/models` endpoint to see all available models and their `api_type` field to determine which endpoint to use.
 
 ## Security
 
@@ -435,8 +435,18 @@ The proxy automatically maps common model names to GitHub Copilot models:
 # Check if service is running
 curl http://localhost:8081/health
 
-# View logs (if running in foreground)
-./github-copilot-svcs run
+# List available models with api_type field
+curl http://localhost:8081/v1/models
+
+# Test chat completions
+curl -X POST http://localhost:8081/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4.1","messages":[{"role":"user","content":"hi"}]}'
+
+# Test responses API
+curl -X POST http://localhost:8081/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5.6-luna","input":"hi","max_output_tokens":20}'
 ```
 
 ### Port Conflicts
@@ -450,12 +460,22 @@ curl http://localhost:8081/health
 
 ### Using with curl
 ```bash
+# Chat Completions (for GPT-4.x, Claude, Gemini models)
 curl -X POST http://localhost:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-4.1",
     "messages": [{"role": "user", "content": "Write a hello world in Python"}],
     "max_tokens": 100
+  }'
+
+# Responses API (for GPT-5.x nano/mini/codex models)
+curl -X POST http://localhost:8081/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.6-luna",
+    "input": "Write a hello world in Python",
+    "max_output_tokens": 100
   }'
 ```
 
@@ -484,7 +504,7 @@ curl -X POST http://localhost:8081/v1/chat/completions \
 - Supports multi-part message content (text + images)
 - Accepts base64-encoded images as data URIs
 - Supports `detail` parameter (`auto`, `low`, `high`)
-- Compatible with vision-capable models (gpt-4o, gpt-4-vision, etc.)
+- Compatible with vision-capable models (gpt-4o, claude-haiku-4.5, etc.)
 - Backward compatible with text-only requests
 
 **Example Script:**
@@ -521,6 +541,26 @@ llm = OpenAI(
 response = llm("Write a hello world in Python")
 print(response)
 ```
+
+### Using with Codex CLI
+
+To use this proxy with Codex CLI, add a model provider configuration to your Codex config file (e.g., `~/.codex/config.toml`):
+
+```toml
+model = "gpt-5.6-terra"
+model_provider = "local-ghcp"
+model_reasoning_effort = "medium"
+
+[model_providers.local-ghcp]
+name = "local-ghcp"
+base_url = "http://localhost:8081/v1"
+wire_api = "responses"
+experimental_bearer_token = "sk-local"
+requires_openai_auth = false
+supports_websockets = false
+```
+
+This configures Codex to use the proxy's Responses API endpoint (`/v1/responses`) for GPT-5.x models. The `wire_api = "responses"` setting ensures Codex uses the correct transport.
 
 ## Development
 

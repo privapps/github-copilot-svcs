@@ -26,9 +26,9 @@ type HealthStatus string
 
 const (
 	// StatusHealthy indicates the service is healthy.
-	StatusHealthy   HealthStatus = "healthy"
+	StatusHealthy HealthStatus = "healthy"
 	// StatusDegraded indicates the service is degraded.
-	StatusDegraded  HealthStatus = "degraded"
+	StatusDegraded HealthStatus = "degraded"
 	// StatusUnhealthy indicates the service is unhealthy.
 	StatusUnhealthy HealthStatus = "unhealthy"
 )

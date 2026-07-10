@@ -15,9 +15,33 @@ import (
 	"time"
 )
 
-var copilotAPIBase = "https://api.githubcopilot.com"
-var completionsPath = "/completions"
+var (
+	copilotAPIBase   = "https://api.githubcopilot.com"
+	copilotAPIBaseMu sync.RWMutex
+)
 var chatCompletionsPath = "/chat/completions"
+var responsesPath = "/responses"
+
+// SetCopilotAPIBase overrides the upstream API base URL for testing.
+func SetCopilotAPIBase(base string) {
+	copilotAPIBaseMu.Lock()
+	defer copilotAPIBaseMu.Unlock()
+	copilotAPIBase = base
+}
+
+// ResetCopilotAPIBase restores the default upstream API base URL.
+func ResetCopilotAPIBase() {
+	copilotAPIBaseMu.Lock()
+	defer copilotAPIBaseMu.Unlock()
+	copilotAPIBase = "https://api.githubcopilot.com"
+}
+
+// GetCopilotAPIBase returns the current upstream API base URL.
+func GetCopilotAPIBase() string {
+	copilotAPIBaseMu.RLock()
+	defer copilotAPIBaseMu.RUnlock()
+	return copilotAPIBase
+}
 
 const (
 	maxChatRetries     = 3
@@ -352,12 +376,12 @@ func (s *ProxyService) processProxyRequest(ctx context.Context, w http.ResponseW
 
 	// Create new request to GitHub Copilot
 	var targetURL string
-	base := copilotAPIBase
+	base := GetCopilotAPIBase()
 	switch r.URL.Path {
-	case "/v1/completions":
-		targetURL = base + completionsPath
 	case "/v1/chat/completions":
 		targetURL = base + chatCompletionsPath
+	case "/v1/responses":
+		targetURL = base + responsesPath
 	default:
 		return fmt.Errorf("unsupported proxy path: %s", r.URL.Path)
 	}

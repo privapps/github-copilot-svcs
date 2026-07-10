@@ -65,18 +65,27 @@ func TestGetDefault(t *testing.T) {
 	}
 
 	// Verify structure of default models
-	expectedModels := map[string]string{
-		"gpt-4o":               "openai",
-		"claude-3.5-sonnet":    "anthropic",
-		"gemini-2.5-pro":       "google",
-		"claude-opus-4":        "anthropic",
-		"o3":                   "openai",
-		"gemini-2.0-flash-001": "google",
+	expectedModels := map[string]struct {
+		owner   string
+		apiType string
+	}{
+		"gpt-4o":                 {"openai", "chat_completions"},
+		"gpt-4.1":                {"openai", "chat_completions"},
+		"claude-haiku-4.5":       {"anthropic", "chat_completions"},
+		"claude-sonnet-5":        {"anthropic", "chat_completions"},
+		"claude-opus-4.8":        {"anthropic", "chat_completions"},
+		"gemini-3.5-flash":       {"google", "chat_completions"},
+		"gemini-3.1-pro-preview": {"google", "chat_completions"},
+		"gpt-5.3-codex":          {"openai", "responses"},
+		"gpt-5.4-mini":           {"openai", "responses"},
+		"gpt-5.6-luna":           {"openai", "responses"},
+		"gpt-5.6-sol":            {"openai", "responses"},
+		"gpt-5.6-terra":          {"openai", "responses"},
 	}
 
-	modelMap := make(map[string]string)
+	modelMap := make(map[string]transform.Model)
 	for _, model := range models {
-		modelMap[model.ID] = model.OwnedBy
+		modelMap[model.ID] = model
 
 		// Verify model structure
 		if model.Object != "model" {
@@ -85,14 +94,23 @@ func TestGetDefault(t *testing.T) {
 		if model.Created == 0 {
 			t.Error("Expected model created timestamp to be set")
 		}
+		if model.APIType == "" {
+			t.Errorf("Model '%s': Expected non-empty APIType", model.ID)
+		}
 	}
 
 	// Check that expected models are present
-	for expectedID, expectedOwner := range expectedModels {
-		if owner, exists := modelMap[expectedID]; !exists {
+	for expectedID, expected := range expectedModels {
+		model, exists := modelMap[expectedID]
+		if !exists {
 			t.Errorf("Expected model '%s' not found in default models", expectedID)
-		} else if owner != expectedOwner {
-			t.Errorf("Expected model '%s' to be owned by '%s', got '%s'", expectedID, expectedOwner, owner)
+			continue
+		}
+		if model.OwnedBy != expected.owner {
+			t.Errorf("Model '%s': Expected owner '%s', got '%s'", expectedID, expected.owner, model.OwnedBy)
+		}
+		if model.APIType != expected.apiType {
+			t.Errorf("Model '%s': Expected api_type '%s', got '%s'", expectedID, expected.apiType, model.APIType)
 		}
 	}
 }
@@ -289,6 +307,9 @@ func TestModelsServiceHandler_ReturnsModelsSuccessfully(t *testing.T) {
 		if model.OwnedBy == "" {
 			t.Errorf("Model %d: Expected non-empty OwnedBy", i)
 		}
+		if model.APIType == "" {
+			t.Errorf("Model %d: Expected non-empty APIType", i)
+		}
 	}
 }
 
@@ -435,12 +456,13 @@ func TestModelOwnershipDetection(t *testing.T) {
 	models := internal.GetDefault()
 
 	ownershipTests := map[string]string{
-		"gpt-4o":               "openai",
-		"claude-3.5-sonnet":    "anthropic",
-		"gemini-2.5-pro":       "google",
-		"o3":                   "openai",
-		"claude-opus-4":        "anthropic",
-		"gemini-2.0-flash-001": "google",
+		"gpt-4o":           "openai",
+		"gpt-4.1":          "openai",
+		"claude-haiku-4.5": "anthropic",
+		"claude-sonnet-5":  "anthropic",
+		"gemini-3.5-flash": "google",
+		"gpt-5.6-luna":     "openai",
+		"gpt-5.6-sol":      "openai",
 	}
 
 	for _, model := range models {
@@ -468,6 +490,20 @@ func TestModelTimestamps(t *testing.T) {
 		if model.Created < now-tolerance || model.Created > now+tolerance {
 			t.Errorf("Model '%s': Created timestamp %d seems wrong (current: %d)",
 				model.ID, model.Created, now)
+		}
+	}
+}
+
+func TestModelAPIType(t *testing.T) {
+	models := internal.GetDefault()
+
+	for _, model := range models {
+		switch model.APIType {
+		case "chat_completions", "responses":
+			// valid
+		default:
+			t.Errorf("Model '%s': Expected api_type to be 'chat_completions' or 'responses', got '%s'",
+				model.ID, model.APIType)
 		}
 	}
 }

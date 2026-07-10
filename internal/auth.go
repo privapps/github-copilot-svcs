@@ -82,7 +82,6 @@ func WithRefreshFunc(f func(cfg *Config) error) func(*AuthService) {
 	}
 }
 
-
 // Authenticate performs the full GitHub Copilot authentication flow
 func (s *AuthService) Authenticate(cfg *Config) error {
 	now := time.Now().Unix()

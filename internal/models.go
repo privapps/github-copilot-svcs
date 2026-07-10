@@ -36,10 +36,10 @@ func FetchFromModelsDev(httpClient *http.Client) (*transform.ModelList, error) {
 		return nil, err
 	}
 	defer func() {
-	if err := resp.Body.Close(); err != nil {
-		Warn("Error closing response body", "error", err)
-	}
-}()
+		if err := resp.Body.Close(); err != nil {
+			Warn("Error closing response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, NewNetworkError("fetch_models", "https://models.dev/api.json", fmt.Sprintf("API returned HTTP %d", resp.StatusCode), nil)
@@ -78,6 +78,7 @@ func FetchFromModelsDev(httpClient *http.Client) (*transform.ModelList, error) {
 			Object:  "model",
 			Created: time.Now().Unix(),
 			OwnedBy: ownedBy,
+			APIType: apiTypeForModel(modelID),
 		})
 	}
 
@@ -87,25 +88,58 @@ func FetchFromModelsDev(httpClient *http.Client) (*transform.ModelList, error) {
 	}, nil
 }
 
-// GetDefault returns a default list of models based on actual models.dev GitHub Copilot entries
-func GetDefault() []transform.Model {
-	return []transform.Model{
-		// GitHub Copilot (OpenAI-compatible)
-		{ID: "gpt-4o", Object: "model", Created: time.Now().Unix(), OwnedBy: "openai"},
-		{ID: "gpt-4.1", Object: "model", Created: time.Now().Unix(), OwnedBy: "openai"},
-		{ID: "o3", Object: "model", Created: time.Now().Unix(), OwnedBy: "openai"},
-		{ID: "o3-mini", Object: "model", Created: time.Now().Unix(), OwnedBy: "openai"},
-		{ID: "o4-mini", Object: "model", Created: time.Now().Unix(), OwnedBy: "openai"},
-		// Claude (Anthropic)
-		{ID: "claude-3.5-sonnet", Object: "model", Created: time.Now().Unix(), OwnedBy: "anthropic"},
-		{ID: "claude-3.7-sonnet", Object: "model", Created: time.Now().Unix(), OwnedBy: "anthropic"},
-		{ID: "claude-3.7-sonnet-thought", Object: "model", Created: time.Now().Unix(), OwnedBy: "anthropic"},
-		{ID: "claude-opus-4", Object: "model", Created: time.Now().Unix(), OwnedBy: "anthropic"},
-		{ID: "claude-sonnet-4", Object: "model", Created: time.Now().Unix(), OwnedBy: "anthropic"},
-		// Gemini (Google)
-		{ID: "gemini-2.5-pro", Object: "model", Created: time.Now().Unix(), OwnedBy: "google"},
-		{ID: "gemini-2.0-flash-001", Object: "model", Created: time.Now().Unix(), OwnedBy: "google"},
+// apiTypeForModel returns the API endpoint type for a model.
+// Models are divided into two categories based on testing:
+//   - "chat_completions": Use /v1/chat/completions (OpenAI Chat Completions API)
+//   - "responses": Use /v1/responses (OpenAI Responses API)
+func apiTypeForModel(modelID string) string {
+	responsesModels := map[string]bool{
+		"gpt-5.3-codex": true,
+		"gpt-5.4-mini":  true,
+		"gpt-5.6-luna":  true,
+		"gpt-5.6-sol":   true,
+		"gpt-5.6-terra": true,
 	}
+	if responsesModels[modelID] {
+		return "responses"
+	}
+	return "chat_completions"
+}
+
+// GetDefault returns a default list of models based on actual GitHub Copilot entries.
+func GetDefault() []transform.Model {
+	now := time.Now().Unix()
+	entries := []struct {
+		id      string
+		ownedBy string
+		apiType string
+	}{
+		// Chat Completions models
+		{"gpt-4o", "openai", "chat_completions"},
+		{"gpt-4.1", "openai", "chat_completions"},
+		{"claude-haiku-4.5", "anthropic", "chat_completions"},
+		{"claude-sonnet-5", "anthropic", "chat_completions"},
+		{"claude-opus-4.8", "anthropic", "chat_completions"},
+		{"gemini-3.5-flash", "google", "chat_completions"},
+		{"gemini-3.1-pro-preview", "google", "chat_completions"},
+		// Responses API models
+		{"gpt-5.3-codex", "openai", "responses"},
+		{"gpt-5.4-mini", "openai", "responses"},
+		{"gpt-5.6-luna", "openai", "responses"},
+		{"gpt-5.6-sol", "openai", "responses"},
+		{"gpt-5.6-terra", "openai", "responses"},
+	}
+	models := make([]transform.Model, len(entries))
+	for i, e := range entries {
+		models[i] = transform.Model{
+			ID:      e.id,
+			Object:  "model",
+			Created: now,
+			OwnedBy: e.ownedBy,
+			APIType: e.apiType,
+		}
+	}
+	return models
 }
 
 // containsAny checks if text contains any of the substrings
@@ -184,39 +218,39 @@ func (s *ModelsService) Handler() http.HandlerFunc {
 			return modelList
 		})
 
-        modelList := result.(*transform.ModelList)
-        // Filter if allowed_models is set in config
-        cfg, cfgErr := LoadConfig(true)
-        filtered := modelList.Data
-        filteredMsg := ""
-        if cfgErr == nil && cfg.AllowedModels != nil && len(cfg.AllowedModels) > 0 {
-            allowedSet := make(map[string]struct{}, len(cfg.AllowedModels))
-            for _, name := range cfg.AllowedModels {
-                allowedSet[name] = struct{}{}
-            }
-            var modelsFiltered []transform.Model
-            for _, m := range filtered {
-                if _, ok := allowedSet[m.ID]; ok {
-                    modelsFiltered = append(modelsFiltered, m)
-                }
-            }
-            filtered = modelsFiltered
-            filteredMsg = "(filtered by allowed_models from config)"
-        }
-        resp := struct {
-            Object string             `json:"object"`
-            Data   []transform.Model  `json:"data"`
-            Filtered string           `json:"note,omitempty"`
-        }{
-            Object: "list",
-            Data: filtered,
-            Filtered: filteredMsg,
-        }
-        Debug("Returning models", "count", len(filtered))
-        w.Header().Set("Content-Type", "application/json")
-        if err := json.NewEncoder(w).Encode(resp); err != nil {
-            Error("Error encoding models response", "error", err)
-            http.Error(w, "Internal server error", http.StatusInternalServerError)
-        }
+		modelList := result.(*transform.ModelList)
+		// Filter if allowed_models is set in config
+		cfg, cfgErr := LoadConfig(true)
+		filtered := modelList.Data
+		filteredMsg := ""
+		if cfgErr == nil && cfg.AllowedModels != nil && len(cfg.AllowedModels) > 0 {
+			allowedSet := make(map[string]struct{}, len(cfg.AllowedModels))
+			for _, name := range cfg.AllowedModels {
+				allowedSet[name] = struct{}{}
+			}
+			var modelsFiltered []transform.Model
+			for _, m := range filtered {
+				if _, ok := allowedSet[m.ID]; ok {
+					modelsFiltered = append(modelsFiltered, m)
+				}
+			}
+			filtered = modelsFiltered
+			filteredMsg = "(filtered by allowed_models from config)"
+		}
+		resp := struct {
+			Object   string            `json:"object"`
+			Data     []transform.Model `json:"data"`
+			Filtered string            `json:"note,omitempty"`
+		}{
+			Object:   "list",
+			Data:     filtered,
+			Filtered: filteredMsg,
+		}
+		Debug("Returning models", "count", len(filtered))
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			Error("Error encoding models response", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 	}
 }

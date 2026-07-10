@@ -121,7 +121,7 @@ func NewServer(cfg *Config, httpClient *http.Client) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", modelsService.Handler())
 	mux.HandleFunc("/v1/chat/completions", proxyService.Handler())
-	mux.HandleFunc("/v1/completions", proxyService.Handler())
+	mux.HandleFunc("/v1/responses", proxyService.Handler())
 	mux.HandleFunc("/health", healthChecker.Handler())
 
 	// Add pprof endpoints for profiling
@@ -176,7 +176,7 @@ func (s *Server) Start() error {
 	fmt.Printf("Endpoints:\n")
 	fmt.Printf("  - Models: http://localhost:%d/v1/models\n", port)
 	fmt.Printf("  - Chat: http://localhost:%d/v1/chat/completions\n", port)
-	fmt.Printf("  - Completions: http://localhost:%d/v1/completions\n", port)
+	fmt.Printf("  - Responses: http://localhost:%d/v1/responses\n", port)
 	fmt.Printf("  - Health: http://localhost:%d/health\n", port)
 
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
