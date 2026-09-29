@@ -123,6 +123,7 @@ func NewServer(cfg *Config, httpClient *http.Client) *Server {
 	mux.HandleFunc("/v1/chat/completions", proxyService.Handler())
 	mux.HandleFunc("/v1/responses", proxyService.Handler())
 	mux.HandleFunc("/health", healthChecker.Handler())
+	mux.HandleFunc("/quota", NewQuotaService(cfg, httpClient, "").Handler())
 
 	// Add pprof endpoints for profiling
 	mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)

@@ -187,6 +187,7 @@ docker run --rm \
 | `config` | Display current configuration details |
 | `models` | List all available AI models |
 | `refresh`| Manually force token refresh |
+| `quota`  | Show Copilot premium interactions quota (`--json` supported) |
 | `version`| Show version information |
 | `help`   | Show usage information |
 
@@ -255,6 +256,13 @@ GET http://localhost:8081/v1/models
 ```bash
 GET http://localhost:8081/health
 ```
+
+### Premium Interactions Quota
+```bash
+GET http://localhost:8081/quota
+./github-copilot-svcs quota [--json]
+```
+Returns `percent_remaining`, `quota_remaining`, `remaining`, `entitlement`, `credits_used`, overage info and `quota_reset_date` (cached for 30s). Like the other endpoints, `/quota` is unauthenticated, so do not expose the proxy publicly.
 
 ### Profiling Endpoints (Production Monitoring)
 ```bash

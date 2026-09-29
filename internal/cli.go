@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,6 +20,7 @@ const (
 	cmdConfig  = "config"
 	cmdStatus  = "status"
 	cmdRefresh = "refresh"
+	cmdQuota   = "quota"
 
 	// Constants to avoid magic numbers
 	defaultRefreshThreshold = 300 // 5 minutes minimum refresh threshold
@@ -42,6 +44,7 @@ Commands:
   config   Display current configuration details
   models   List all available AI models
   refresh  Manually force token refresh
+  quota    Show Copilot premium interactions quota (--json supported)
   help     Show this help message
   version  Show version information
 
@@ -79,6 +82,8 @@ func RunCommand(command string, args []string, version string) error {
 		return handleStatusWithFormat(jsonOutput)
 	case cmdRefresh:
 		return handleRefresh()
+	case cmdQuota:
+		return handleQuota(jsonOutput)
 	case "version":
 		fmt.Printf("github-copilot-svcs version %s\n", version)
 		return nil
@@ -377,4 +382,53 @@ func handleRefresh() error {
 	fmt.Printf("New token expires in: %dm %ds\n", minutes, seconds)
 
 	return nil
+}
+
+func handleQuota(jsonOutput bool) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, ErrMissingTokens) {
+			fmt.Println("Not authenticated. Run 'auth' to authenticate.")
+			return nil
+		}
+		return fmt.Errorf("failed to load config: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), quotaTimeout)
+	defer cancel()
+
+	q, err := FetchQuota(ctx, CreateHTTPClient(cfg), copilotUserURL, cfg.GitHubToken, cfg.Headers.UserAgent)
+	if err != nil {
+		return fmt.Errorf("failed to fetch quota: %w", err)
+	}
+
+	if jsonOutput {
+		if err := json.NewEncoder(os.Stdout).Encode(q); err != nil {
+			return fmt.Errorf("failed to encode quota as JSON: %w", err)
+		}
+		return nil
+	}
+	printQuotaText(q)
+	return nil
+}
+
+func printQuotaText(q *QuotaSnapshot) {
+	if q.CopilotPlan != "" {
+		fmt.Printf("Plan: %s\n", q.CopilotPlan)
+	}
+	if q.Unlimited {
+		fmt.Println("Premium interactions: unlimited")
+	} else {
+		fmt.Printf("Premium interactions remaining: %.1f%% (%.1f)\n", q.PercentRemaining, q.QuotaRemaining)
+		if q.Entitlement > 0 {
+			fmt.Printf("Entitlement: %.0f, remaining: %.0f\n", q.Entitlement, q.Remaining)
+		}
+		if q.CreditsUsed > 0 {
+			fmt.Printf("Credits used: %.0f\n", q.CreditsUsed)
+		}
+		fmt.Printf("Overage permitted: %t (count: %.0f)\n", q.OveragePermitted, q.OverageCount)
+	}
+	if q.QuotaResetDate != "" {
+		fmt.Printf("Quota resets: %s\n", q.QuotaResetDate)
+	}
 }
